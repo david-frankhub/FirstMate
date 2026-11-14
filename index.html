@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>FirstMate | Banking Support Prototype</title>
+  <style>
+    :root {
+      --primary: #002d62;
+      --accent: #d4af37;
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      max-width: 480px;
+      margin: 0 auto;
+      border-left: 1px solid #e5e7eb;
+      border-right: 1px solid #e5e7eb;
+    }
+    header {
+      background: var(--primary);
+      color: #fff;
+      padding: 14px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo { font-weight: 700; font-size: 1.2rem; letter-spacing: 0.5px; }
+    .logo span { color: var(--accent); }
+    .header-controls { display: flex; gap: 8px; align-items: center; }
+    select, .speak-toggle {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    select option { color: #000; }
+    .speak-toggle { cursor: pointer; }
+    .notice {
+      font-size: 0.75rem;
+      padding: 8px 12px;
+      text-align: center;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .disclaimer { background: #fef3c7; color: #92400e; border-bottom-color: #fde68a; }
+    .safety { background: #ecfdf5; color: #065f46; border-bottom-color: #a7f3d0; }
+    .chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .msg.bot { background: var(--card); align-self: flex-start; border: 1px solid #e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .msg.user { background: var(--primary); color: #fff; align-self: flex-end; }
+    .msg.error { background: #fee2e2; color: #991b1b; align-self: flex-start; }
+    .ref { font-weight: 600; color: var(--primary); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 8px; }
+    .chip {
+      background: var(--card);
+      border: 1px solid #d1d5db;
+      color: var(--primary);
+      border-radius: 16px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .voice-section {
+      background: var(--card);
+      padding: 16px;
+      border-top: 1px solid #e5e7eb;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    .mic-btn {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      border: 3px solid var(--accent);
+      font-size: 1.5rem;
+      cursor: pointer;
+      transition: transform 0.1s ease, background 0.2s ease;
+    }
+    .mic-btn:active { transform: scale(0.95); }
+    .mic-btn.listening { background: #dc2626; }
+    .mic-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status-text { font-size: 0.8rem; color: var(--muted); text-align: center; min-height: 1em; }
+    .input-row { display: flex; width: 100%; gap: 8px; }
+    input[type="text"] {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      min-width: 0;
+    }
+    .send-btn {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .send-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">FIRST<span>MATE</span></div>
+    <div class="header-controls">
+      <button class="speak-toggle" id="speakToggle" aria-pressed="true" title="Read replies aloud">🔊 On</button>
+      <select id="languageSelect" aria-label="Language">
+        <option value="auto">Auto</option>
+        <option value="en">English</option>
+        <option value="pcm">Nigerian Pidgin</option>
+      </select>
+    </div>
+  </header>
+
+  <div class="notice disclaimer">Independent concept demo. Not an official FirstBank service.</div>
+  <div class="notice safety">FirstMate will never ask for your PIN, password, OTP or card details.</div>
+
+  <div class="chat-container" id="chatFeed" aria-live="polite">
+    <div class="msg bot">Hello! I am FirstMate, your digital banking support companion. How can I guide you today?</div>
+  </div>
+
+  <div class="chips" id="chips">
+    <button class="chip" data-text="My transfer has not arrived">Transfer not received</button>
+    <button class="chip" data-text="I lost my card">Lost card</button>
+    <button class="chip" data-text="I can't log in to the app">Can't log in</button>
+    <button class="chip" data-text="How do I buy airtime?">Buy airtime</button>
+    <button class="chip" data-text="I want to speak to an agent">Talk to an agent</button>
+  </div>
+
+  <div class="voice-section">
+    <button class="mic-btn" id="micBtn" aria-label="Talk to FirstMate">🎤</button>
+    <div class="status-text" id="statusText">Tap microphone to speak</div>
+    <div class="input-row">
+      <input type="text" id="textInput" placeholder="Type a message or issue..." maxlength="500" />
+      <button class="send-btn" id="sendBtn">Send</button>
+    </div>
+  </div>
+
+  <script>
+    const chatFeed = document.getElementById('chatFeed');
+    const textInput = document.getElementById('textInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const micBtn = document.getElementById('micBtn');
+    const statusText = document.getElementById('statusText');
+    const langSelect = document.getElementById('languageSelect');
+    const speakToggle = document.getElementById('speakToggle');
+    const chips = document.getElementById('chips');
+
+    let speakReplies = true;
+    let busy = false;
+
+    speakToggle.addEventListener('click', () => {
+      speakReplies = !speakReplies;
+      speakToggle.textContent = speakReplies ? '🔊 On' : '🔇 Off';
+      speakToggle.setAttribute('aria-pressed', String(speakReplies));
+      if (!speakReplies && 'speechSynthesis' in window) speechSynthesis.cancel();
+    });
+
+    function appendMessage(text, sender, reference) {
+      const msg = document.createElement('div');
+      msg.className = `msg ${sender}`;
+      if (reference) {
+        const idx = text.indexOf(reference);
+        if (idx !== -1) {
+          msg.append(text.slice(0, idx));
+          const strong = document.createElement('span');
+          strong.className = 'ref';
+          strong.textContent = reference;
+          msg.append(strong, text.slice(idx + reference.length));
+        } else {
+          msg.textContent = text;
+        }
+      } else {
+        msg.textContent = text;
+      }
+      chatFeed.appendChild(msg);
+      chatFeed.scrollTop = chatFeed.scrollHeight;
+      return msg;
+    }
+
+    function speak(text) {
+      if (!speakReplies || !('speechSynthesis' in window)) return;
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-NG';
+      speechSynthesis.speak(u);
+    }
+
+    async function sendMessage(text) {
+      const message = (text || '').trim();
+      if (!message || busy) return;
+      busy = true;
+      sendBtn.disabled = true;
+      micBtn.disabled = true;
+      appendMessage(message, 'user');
+      textInput.value = '';
+      statusText.textContent = 'FirstMate is typing...';
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, lang: langSelect.value })
+        });
+        if (!res.ok) throw new Error('Request failed');
+        const data = await res.json();
+        appendMessage(data.reply, 'bot', data.reference);
+        speak(data.reply);
+      } catch (err) {
+        appendMessage('Sorry, I could not reach FirstMate just now. Please try again in a moment.', 'bot error');
+      } finally {
+        busy = false;
+        sendBtn.disabled = false;
+        micBtn.disabled = false;
+        statusText.textContent = 'Tap microphone to speak';
+      }
+    }
+
+    sendBtn.addEventListener('click', () => sendMessage(textInput.value));
+    textInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(textInput.value); });
+    chips.addEventListener('click', (e) => {
+      const chip = e.target.closest('.chip');
+      if (chip) sendMessage(chip.dataset.text);
+    });
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-NG';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      micBtn.addEventListener('click', () => {
+        if (busy) return;
+        try {
+          recognition.start();
+          statusText.textContent = 'Listening...';
+          micBtn.classList.add('listening');
+        } catch {
+          statusText.textContent = 'Microphone is already active.';
+        }
+      });
+
+      recognition.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        micBtn.classList.remove('listening');
+        sendMessage(transcript);
+      };
+      recognition.onerror = () => {
+        micBtn.classList.remove('listening');
+        statusText.textContent = 'Could not catch that. Try typing below.';
+      };
+      recognition.onend = () => {
+        micBtn.classList.remove('listening');
+        if (!busy) statusText.textContent = 'Tap microphone to speak';
+      };
+    } else {
+      micBtn.disabled = true;
+      statusText.textContent = 'Voice input is not supported in this browser. Please type your message.';
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "firstmate",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "SUPPORT_HOTLINE": "REPLACE_WITH_OFFICIAL_FIRSTBANK_NUMBER"
+  }
+}
