@@ -47,14 +47,29 @@
     }
     select option { color: #000; }
     .speak-toggle { cursor: pointer; }
-    .notice {
-      font-size: 0.75rem;
-      padding: 8px 12px;
-      text-align: center;
-      border-bottom: 1px solid #e5e7eb;
-    }
+    .notice { font-size: 0.75rem; padding: 8px 12px; text-align: center; border-bottom: 1px solid #e5e7eb; }
     .disclaimer { background: #fef3c7; color: #92400e; border-bottom-color: #fde68a; }
     .safety { background: #ecfdf5; color: #065f46; border-bottom-color: #a7f3d0; }
+    .call-bar {
+      display: none;
+      background: #0f766e;
+      color: #fff;
+      padding: 10px 16px;
+      font-size: 0.85rem;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .call-bar.show { display: flex; }
+    .call-bar button {
+      background: #dc2626;
+      color: #fff;
+      border: none;
+      border-radius: 16px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
     .chat-container {
       flex: 1;
       overflow-y: auto;
@@ -96,6 +111,7 @@
       gap: 10px;
       padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
     }
+    .controls-row { display: flex; align-items: center; gap: 16px; }
     .mic-btn {
       width: 64px;
       height: 64px;
@@ -110,6 +126,17 @@
     .mic-btn:active { transform: scale(0.95); }
     .mic-btn.listening { background: #dc2626; }
     .mic-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .call-btn {
+      background: #0f766e;
+      color: #fff;
+      border: none;
+      border-radius: 20px;
+      padding: 10px 16px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .call-btn.end { background: #dc2626; }
+    .call-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .status-text { font-size: 0.8rem; color: var(--muted); text-align: center; min-height: 1em; }
     .input-row { display: flex; width: 100%; gap: 8px; }
     input[type="text"] {
@@ -149,6 +176,11 @@
   <div class="notice disclaimer">Independent concept demo. Not an official FirstBank service.</div>
   <div class="notice safety">FirstMate will never ask for your PIN, password, OTP or card details.</div>
 
+  <div class="call-bar" id="callBar">
+    <span id="callStatus">On call with FirstMate</span>
+    <button id="endCallBtn">End call</button>
+  </div>
+
   <div class="chat-container" id="chatFeed" aria-live="polite">
     <div class="msg bot">Hello! I am FirstMate, your digital banking support companion. How can I guide you today?</div>
   </div>
@@ -162,8 +194,11 @@
   </div>
 
   <div class="voice-section">
-    <button class="mic-btn" id="micBtn" aria-label="Talk to FirstMate">🎤</button>
-    <div class="status-text" id="statusText">Tap microphone to speak</div>
+    <div class="controls-row">
+      <button class="call-btn" id="callBtn">📞 Start call</button>
+      <button class="mic-btn" id="micBtn" aria-label="Speak once">🎤</button>
+    </div>
+    <div class="status-text" id="statusText">Tap Start call to talk hands-free, or tap the mic to speak once</div>
     <div class="input-row">
       <input type="text" id="textInput" placeholder="Type a message or issue..." maxlength="500" />
       <button class="send-btn" id="sendBtn">Send</button>
@@ -175,61 +210,91 @@
     const textInput = document.getElementById('textInput');
     const sendBtn = document.getElementById('sendBtn');
     const micBtn = document.getElementById('micBtn');
+    const callBtn = document.getElementById('callBtn');
+    const endCallBtn = document.getElementById('endCallBtn');
+    const callBar = document.getElementById('callBar');
+    const callStatus = document.getElementById('callStatus');
     const statusText = document.getElementById('statusText');
     const langSelect = document.getElementById('languageSelect');
     const speakToggle = document.getElementById('speakToggle');
     const chips = document.getElementById('chips');
 
+    const HAS_TTS = 'speechSynthesis' in window;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
     let speakReplies = true;
-    let busy = false;
+    let busy = false;        // waiting for server reply
+    let speaking = false;    // FirstMate is talking
+    let callActive = false;  // hands-free call mode
+    let listening = false;
+
+    const DEFAULT_STATUS = 'Tap Start call to talk hands-free, or tap the mic to speak once';
 
     speakToggle.addEventListener('click', () => {
       speakReplies = !speakReplies;
       speakToggle.textContent = speakReplies ? '🔊 On' : '🔇 Off';
       speakToggle.setAttribute('aria-pressed', String(speakReplies));
-      if (!speakReplies && 'speechSynthesis' in window) speechSynthesis.cancel();
+      if (!speakReplies && HAS_TTS) speechSynthesis.cancel();
     });
 
     function appendMessage(text, sender, reference) {
       const msg = document.createElement('div');
       msg.className = `msg ${sender}`;
-      if (reference) {
-        const idx = text.indexOf(reference);
-        if (idx !== -1) {
-          msg.append(text.slice(0, idx));
-          const strong = document.createElement('span');
-          strong.className = 'ref';
-          strong.textContent = reference;
-          msg.append(strong, text.slice(idx + reference.length));
-        } else {
-          msg.textContent = text;
-        }
+      const idx = reference ? text.indexOf(reference) : -1;
+      if (idx !== -1) {
+        msg.append(text.slice(0, idx));
+        const strong = document.createElement('span');
+        strong.className = 'ref';
+        strong.textContent = reference;
+        msg.append(strong, text.slice(idx + reference.length));
       } else {
         msg.textContent = text;
       }
       chatFeed.appendChild(msg);
       chatFeed.scrollTop = chatFeed.scrollHeight;
-      return msg;
     }
 
-    function speak(text) {
-      if (!speakReplies || !('speechSynthesis' in window)) return;
+    // Speak a reply. onDone runs when speech finishes (or immediately if speech is off).
+    function speak(text, onDone) {
+      if (!speakReplies || !HAS_TTS) { onDone && onDone(); return; }
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'en-NG';
+      speaking = true;
+      const finish = () => { speaking = false; onDone && onDone(); };
+      u.onend = finish;
+      u.onerror = finish;
       speechSynthesis.speak(u);
     }
 
-    async function sendMessage(text) {
+    function stopSpeaking() {
+      if (HAS_TTS) speechSynthesis.cancel();
+      speaking = false;
+    }
+
+    function setStatus(text) { statusText.textContent = text; }
+
+    function updateCallUI() {
+      callBar.classList.toggle('show', callActive);
+      callBtn.textContent = callActive ? '📵 End call' : '📞 Start call';
+      callBtn.classList.toggle('end', callActive);
+      callBtn.disabled = !SpeechRecognition;
+      micBtn.disabled = !SpeechRecognition || callActive;
+    }
+
+    async function sendMessage(text, fromCall = false) {
       const message = (text || '').trim();
       if (!message || busy) return;
+      stopSpeaking();
+      if (listening && recognition) { try { recognition.abort(); } catch {} }
       busy = true;
       sendBtn.disabled = true;
-      micBtn.disabled = true;
       appendMessage(message, 'user');
       textInput.value = '';
-      statusText.textContent = 'FirstMate is typing...';
+      setStatus('FirstMate is thinking...');
+      callStatus.textContent = 'FirstMate is thinking...';
 
+      let reply = null;
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
@@ -238,17 +303,118 @@
         });
         if (!res.ok) throw new Error('Request failed');
         const data = await res.json();
+        reply = data;
         appendMessage(data.reply, 'bot', data.reference);
-        speak(data.reply);
-      } catch (err) {
+      } catch {
         appendMessage('Sorry, I could not reach FirstMate just now. Please try again in a moment.', 'bot error');
       } finally {
         busy = false;
         sendBtn.disabled = false;
-        micBtn.disabled = false;
-        statusText.textContent = 'Tap microphone to speak';
+      }
+
+      if (reply) {
+        callStatus.textContent = 'FirstMate is speaking...';
+        speak(reply.reply, () => afterSpeech(fromCall));
+      } else {
+        afterSpeech(fromCall);
       }
     }
+
+    function afterSpeech(fromCall) {
+      if (callActive) {
+        callStatus.textContent = 'On call with FirstMate';
+        setTimeout(listenInCall, 300);
+      } else {
+        setStatus(DEFAULT_STATUS);
+      }
+    }
+
+    // ---- Speech recognition ----
+    let recognition = null;
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.lang = 'en-NG';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+      recognition.continuous = false;
+
+      recognition.onstart = () => {
+        listening = true;
+        micBtn.classList.add('listening');
+        setStatus('Listening...');
+        if (callActive) callStatus.textContent = 'Listening...';
+      };
+
+      recognition.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        listening = false;
+        micBtn.classList.remove('listening');
+        sendMessage(transcript, callActive);
+      };
+
+      recognition.onerror = (e) => {
+        listening = false;
+        micBtn.classList.remove('listening');
+        if (callActive && (e.error === 'no-speech' || e.error === 'aborted')) {
+          setTimeout(listenInCall, 300);
+          return;
+        }
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          setStatus('Microphone access is blocked. Allow it in your browser settings, or type below.');
+          endCall();
+          return;
+        }
+        setStatus('Could not catch that. Try again or type below.');
+        if (callActive) setTimeout(listenInCall, 500);
+      };
+
+      recognition.onend = () => {
+        listening = false;
+        micBtn.classList.remove('listening');
+        if (!busy && !speaking && !callActive) setStatus(DEFAULT_STATUS);
+      };
+    } else {
+      setStatus('Voice is not supported in this browser. Please type your message.');
+    }
+
+    function listenOnce() {
+      if (!recognition || listening || busy || speaking) return;
+      try { recognition.start(); } catch { /* already started */ }
+    }
+
+    function listenInCall() {
+      if (!callActive || listening || busy || speaking) return;
+      try { recognition.start(); } catch { /* already started */ }
+    }
+
+    // ---- Call mode ----
+    function startCall() {
+      callActive = true;
+      updateCallUI();
+      setStatus('On call. Speak when you hear the listening prompt.');
+      callStatus.textContent = 'FirstMate: How can I help you?';
+      speak('Hello, this is FirstMate. How can I help you today?', () => listenInCall());
+    }
+
+    function endCall() {
+      callActive = false;
+      stopSpeaking();
+      if (recognition && listening) { try { recognition.abort(); } catch {} }
+      listening = false;
+      updateCallUI();
+      setStatus(DEFAULT_STATUS);
+    }
+
+    callBtn.addEventListener('click', () => {
+      if (callActive) endCall(); else startCall();
+    });
+    endCallBtn.addEventListener('click', endCall);
+
+    micBtn.addEventListener('click', () => {
+      if (busy || callActive) return;
+      if (speaking) stopSpeaking();
+      listenOnce();
+    });
 
     sendBtn.addEventListener('click', () => sendMessage(textInput.value));
     textInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(textInput.value); });
@@ -257,41 +423,7 @@
       if (chip) sendMessage(chip.dataset.text);
     });
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.lang = 'en-NG';
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
-
-      micBtn.addEventListener('click', () => {
-        if (busy) return;
-        try {
-          recognition.start();
-          statusText.textContent = 'Listening...';
-          micBtn.classList.add('listening');
-        } catch {
-          statusText.textContent = 'Microphone is already active.';
-        }
-      });
-
-      recognition.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
-        micBtn.classList.remove('listening');
-        sendMessage(transcript);
-      };
-      recognition.onerror = () => {
-        micBtn.classList.remove('listening');
-        statusText.textContent = 'Could not catch that. Try typing below.';
-      };
-      recognition.onend = () => {
-        micBtn.classList.remove('listening');
-        if (!busy) statusText.textContent = 'Tap microphone to speak';
-      };
-    } else {
-      micBtn.disabled = true;
-      statusText.textContent = 'Voice input is not supported in this browser. Please type your message.';
-    }
+    updateCallUI();
   </script>
 </body>
 </html>
